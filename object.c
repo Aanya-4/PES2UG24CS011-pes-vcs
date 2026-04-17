@@ -105,35 +105,57 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     char header[64];
     int header_len = snprintf(header, sizeof(header), "%s %zu", type_str, len) + 1;
 
-    // Step 3: Combine header + data
+    // Step 3: Combine header + data into one buffer
     size_t total_len = (size_t)header_len + len;
     uint8_t *full_object = malloc(total_len);
     if (!full_object) return -1;
     memcpy(full_object, header, header_len);
     memcpy(full_object + header_len, data, len);
 
-    // Step 4: Compute SHA-256
+    // Step 4: Compute SHA-256 of the full object
     ObjectID id;
     compute_hash(full_object, total_len, &id);
     if (id_out) *id_out = id;
 
-    // Step 5: Deduplication — if object already exists, skip writing
+    // Step 5: Deduplication
     if (object_exists(&id)) {
         free(full_object);
         return 0;
     }
 
-    // Step 6: Build shard directory path and create it
- 
+    // Step 6: Create shard directory
     char hex[HASH_HEX_SIZE + 1];
     hash_to_hex(&id, hex);
-
     char shard_dir[256];
     snprintf(shard_dir, sizeof(shard_dir), "%s/%.2s", OBJECTS_DIR, hex);
-    mkdir(shard_dir, 0755);  // OK if already exists
+    mkdir(shard_dir, 0755);
 
+    // Step 7: Compute final path and a temp path in the same directory
+    char final_path[512];
+    object_path(&id, final_path, sizeof(final_path));
+    char tmp_path[520];
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", final_path);
+
+    // Step 8: Write full object to temp file
+    int fd = open(tmp_path, O_CREAT | O_WRONLY | O_TRUNC, 0644);
+    if (fd < 0) { free(full_object); return -1; }
+
+    ssize_t written = write(fd, full_object, total_len);
     free(full_object);
-    return -1; 
+    if (written != (ssize_t)total_len) { close(fd); return -1; }
+
+    // Step 9: fsync to flush kernel buffers to disk
+    fsync(fd);
+    close(fd);
+
+    // Step 10: Atomic rename temp -> final
+    if (rename(tmp_path, final_path) != 0) return -1;
+
+    // Step 11: fsync the shard directory to persist the rename
+    int dir_fd = open(shard_dir, O_RDONLY);
+    if (dir_fd >= 0) { fsync(dir_fd); close(dir_fd); }
+
+    return 0;
 }
 // Read an object from the store.
 //
