@@ -209,14 +209,29 @@ int commit_create(const char *message, ObjectID *commit_id_out) {
     commit.timestamp = (uint64_t)time(NULL);
     snprintf(commit.message, sizeof(commit.message), "%s", message);
 
-    // Step 3: Read the current HEAD to get the parent commit.
-    // head_read() returns -1 if there are no commits yet (first commit).
+    // Step 3: Detect parent
     if (head_read(&commit.parent) == 0) {
-        commit.has_parent = 1;  // Normal commit: has a parent
+        commit.has_parent = 1;
     } else {
-        commit.has_parent = 0;  // Initial commit: no parent
+        commit.has_parent = 0;
     }
 
+    // Step 4: Serialize the Commit struct to text format
+    // commit_serialize is PROVIDED — it writes the text lines
+    void *commit_data;
+    size_t commit_len;
+    if (commit_serialize(&commit, &commit_data, &commit_len) != 0) {
+        return -1;
+    }
+
+    // Step 5: Write the serialized commit to the object store
+    ObjectID commit_id;
+    if (object_write(OBJ_COMMIT, commit_data, commit_len, &commit_id) != 0) {
+        free(commit_data);
+        return -1;
+    }
+    free(commit_data);
+
     (void)commit_id_out;
-    return -1;  // serialization and writing not yet done
+    return -1;  // HEAD update not yet done
 }
