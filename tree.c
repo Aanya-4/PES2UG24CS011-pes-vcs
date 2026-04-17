@@ -165,10 +165,43 @@ static int write_tree_level(IndexEntry *entries, int count, int depth, ObjectID 
             strncpy(entry->name, p, sizeof(entry->name) - 1);
             entry->name[sizeof(entry->name) - 1] = '\0';
             i++;
-        } else {
+	} else {
             // --- THIS IS A SUBDIRECTORY ---
-            // We skip this for now; we'll add the logic here in Commit 4
-            i++; 
+            // 1. Calculate how long the directory name is (e.g., "src")
+            size_t dir_name_len = slash - p;
+            char dir_name[256];
+            if (dir_name_len >= sizeof(dir_name)) return -1;
+            memcpy(dir_name, p, dir_name_len);
+            dir_name[dir_name_len] = '\0';
+
+            // 2. Find all following entries that are also in this same directory
+            int j = i + 1;
+            while (j < count) {
+                const char *next_p = entries[j].path;
+                for (int d = 0; d < depth; d++) {
+                    next_p = strchr(next_p, '/');
+                    if (!next_p) break;
+                    next_p++;
+                }
+                // If it doesn't start with "dir_name/", we've reached the end of the folder
+                if (!next_p || strncmp(next_p, dir_name, dir_name_len) != 0 || next_p[dir_name_len] != '/') {
+                    break;
+                }
+                j++;
+            }
+
+            // 3. RECURSION: Call the worker again for this sub-group of entries
+            if (tree.count >= MAX_TREE_ENTRIES) return -1;
+            TreeEntry *entry = &tree.entries[tree.count++];
+            
+            entry->mode = MODE_DIR; // 0040000
+            strncpy(entry->name, dir_name, sizeof(entry->name) - 1);
+            
+            // This recursive call builds the sub-tree and gives us its hash
+            if (write_tree_level(&entries[i], j - i, depth + 1, &entry->hash) != 0) return -1;
+
+            // 4. Move the main loop index 'i' to the next file outside this folder
+            i = j;
         }
     }
 
