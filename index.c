@@ -182,13 +182,43 @@ int index_load(Index *index) {
 //   - rename                           : atomically moving the temp file over the old index
 //
 // Returns 0 on success, -1 on error.
-int index_save(const Index *index) {
-    // TODO: Implement atomic index saving
-    // (See Lab Appendix for logical steps)
-    (void)index;
-    return -1;
+// Sort helper for saving index entries in alphabetical path order
+static int compare_index_by_path(const void *a, const void *b) {
+    return strcmp(((const IndexEntry *)a)->path, ((const IndexEntry *)b)->path);
 }
+int index_save(const Index *index) {
+    // 1. Work on a copy so we don't reorder the caller's in-memory index
+    Index sorted = *index;
+    qsort(sorted.entries, sorted.count, sizeof(IndexEntry), compare_index_by_path);
 
+    // 2. Write to a temp file first (atomic write pattern)
+    char tmp_path[256];
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", INDEX_FILE);
+    FILE *f = fopen(tmp_path, "w");
+    if (!f) return -1;
+
+    for (int i = 0; i < sorted.count; i++) {
+        IndexEntry *e = &sorted.entries[i];
+        char hex[HASH_HEX_SIZE + 1];
+        hash_to_hex(&e->hash, hex);
+
+        // Format: <mode-octal> <hex-hash> <mtime-sec> <size> <path>
+        fprintf(f, "%o %s %llu %u %s\n",
+                e->mode,
+                hex,
+                (unsigned long long)e->mtime_sec,
+                (unsigned int)e->size,
+                e->path);
+    }
+
+    // 3. Flush buffers to the OS, then sync to physical disk
+    fflush(f);
+    fsync(fileno(f));
+    fclose(f);
+
+    // 4. Atomic rename: temp file replaces the real index
+    return rename(tmp_path, INDEX_FILE);
+}
 // Stage a file for the next commit.
 //
 // HINTS - Useful functions and syscalls:
