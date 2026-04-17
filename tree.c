@@ -130,6 +130,11 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
 //   - object_write    : save that binary buffer to the store as OBJ_TREE
 //
 // Returns 0 on success, -1 on error.
+// Sort helper: index entries must be sorted by path for consistent tree hashing
+static int compare_index_entries_by_path(const void *a, const void *b) {
+    return strcmp(((const IndexEntry *)a)->path, ((const IndexEntry *)b)->path);
+}
+
 int tree_from_index(ObjectID *id_out) {
     // Step 1: Load the current index
     Index index;
@@ -142,6 +147,11 @@ int tree_from_index(ObjectID *id_out) {
         return -1;
     }
 
+    // Step 2: Sort entries by path so subdirectories are grouped together
+    // e.g. src/a.c and src/b.c will be adjacent, making them easy to group
+    qsort(index.entries, index.count, sizeof(IndexEntry),
+          compare_index_entries_by_path);
+
     (void)id_out;
-    return -1;  // tree building not yet implemented
+    return -1;  // recursive tree writing not yet implemented
 }
