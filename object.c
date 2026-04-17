@@ -180,7 +180,56 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
 // The caller is responsible for calling free(*data_out).
 // Returns 0 on success, -1 on error (file not found, corrupt, etc.).
 int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_t *len_out) {
-    // TODO: Implement
-    (void)id; (void)type_out; (void)data_out; (void)len_out;
-    return -1;
+    // Step 1: Get the file path for this object
+    char path[512];
+    object_path(id, path, sizeof(path));
+
+    // Step 2: Open and read the entire file into memory
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+
+    fseek(f, 0, SEEK_END);
+    long file_size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (file_size <= 0) { fclose(f); return -1; }
+
+    uint8_t *buf = malloc((size_t)file_size);
+    if (!buf) { fclose(f); return -1; }
+
+    if ((long)fread(buf, 1, (size_t)file_size, f) != file_size) {
+        free(buf); fclose(f); return -1;
+    }
+    fclose(f);
+
+    // Step 3: Integrity check — recompute hash and compare to requested id
+    ObjectID computed;
+    compute_hash(buf, (size_t)file_size, &computed);
+    if (memcmp(computed.hash, id->hash, HASH_SIZE) != 0) {
+        free(buf);
+        return -1;  // Data is corrupted
+    }
+
+    // Step 4: Find the '\0' that separates header from data
+    uint8_t *null_byte = memchr(buf, '\0', (size_t)file_size);
+    if (!null_byte) { free(buf); return -1; }
+
+    // Step 5: Parse the type from the header (e.g. "blob 16")
+    if      (strncmp((char *)buf, "blob",   4) == 0) *type_out = OBJ_BLOB;
+    else if (strncmp((char *)buf, "tree",   4) == 0) *type_out = OBJ_TREE;
+    else if (strncmp((char *)buf, "commit", 6) == 0) *type_out = OBJ_COMMIT;
+    else { free(buf); return -1; }
+
+    // Step 6: Extract the data portion (everything after the '\0')
+    uint8_t *data_start = null_byte + 1;
+    size_t data_len = (size_t)file_size - (size_t)(data_start - buf);
+
+    void *out = malloc(data_len);
+    if (!out) { free(buf); return -1; }
+    memcpy(out, data_start, data_len);
+
+    *data_out = out;
+    *len_out = data_len;
+
+    free(buf);
+    return 0;
 }
