@@ -135,23 +135,64 @@ static int compare_index_entries_by_path(const void *a, const void *b) {
     return strcmp(((const IndexEntry *)a)->path, ((const IndexEntry *)b)->path);
 }
 
+static int write_tree_level(IndexEntry *entries, int count, int depth, ObjectID *id_out) {
+    Tree tree;
+    tree.count = 0;
+    int i = 0;
+
+    while (i < count) {
+        // Look at the file path (e.g., "src/main.c")
+        const char *p = entries[i].path;
+        
+        // Skip over parent folder names based on how deep we are
+        for (int d = 0; d < depth; d++) {
+            p = strchr(p, '/');
+            if (!p) return -1;
+            p++; 
+        }
+
+        // Check if there's another '/' in the remaining path
+        const char *slash = strchr(p, '/');
+
+        if (!slash) {
+            // --- THIS IS A FILE ---
+            if (tree.count >= MAX_TREE_ENTRIES) return -1;
+            TreeEntry *entry = &tree.entries[tree.count++];
+            
+            entry->mode = entries[i].mode;
+            entry->hash = entries[i].hash;
+            // Copy the filename (like "main.c") into the tree entry
+            strncpy(entry->name, p, sizeof(entry->name) - 1);
+            entry->name[sizeof(entry->name) - 1] = '\0';
+            i++;
+        } else {
+            // --- THIS IS A SUBDIRECTORY ---
+            // We skip this for now; we'll add the logic here in Commit 4
+            i++; 
+        }
+    }
+
+    // Now turn this "Tree" structure into a data buffer and save it to disk
+    void *data;
+    size_t len;
+    if (tree_serialize(&tree, &data, &len) != 0) return -1;
+    
+    // Use your object_write function from Phase 1!
+    int rc = object_write(OBJ_TREE, data, len, id_out);
+    
+    free(data);
+    return rc;
+}
+
 int tree_from_index(ObjectID *id_out) {
-    // Step 1: Load the current index
     Index index;
-    if (index_load(&index) != 0) {
-        fprintf(stderr, "error: failed to load index\n");
-        return -1;
-    }
-    if (index.count == 0) {
-        fprintf(stderr, "error: nothing staged to commit\n");
-        return -1;
-    }
+    // 1. Load the index
+    if (index_load(&index) != 0) return -1;
+    if (index.count == 0) return -1;
 
-    // Step 2: Sort entries by path so subdirectories are grouped together
-    // e.g. src/a.c and src/b.c will be adjacent, making them easy to group
-    qsort(index.entries, index.count, sizeof(IndexEntry),
-          compare_index_entries_by_path);
+    // 2. Sort the index (already done in Commit 2)
+    qsort(index.entries, index.count, sizeof(IndexEntry), compare_index_entries_by_path);
 
-    (void)id_out;
-    return -1;  // recursive tree writing not yet implemented
+    // 3. START THE WORKER at depth 0 (the root folder)
+    return write_tree_level(index.entries, index.count, 0, id_out);
 }
