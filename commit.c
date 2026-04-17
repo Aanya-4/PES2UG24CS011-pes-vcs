@@ -194,15 +194,29 @@ int head_update(const ObjectID *new_commit) {
 //
 // Returns 0 on success, -1 on error.
 int commit_create(const char *message, ObjectID *commit_id_out) {
-    // Step 1: Build the directory tree from the current index.
-    // This writes all necessary tree objects to the object store
-    // and gives us the root tree's hash.
+    // Step 1: Build tree from index
     ObjectID tree_id;
     if (tree_from_index(&tree_id) != 0) {
         fprintf(stderr, "error: failed to build tree (is anything staged?)\n");
         return -1;
     }
 
-    (void)message; (void)commit_id_out;
-    return -1;  // commit creation not yet done
+    // Step 2: Prepare the Commit struct
+    Commit commit;
+    memset(&commit, 0, sizeof(commit));
+
+    // Tree hash — the snapshot this commit points to
+    commit.tree = tree_id;
+
+    // Author from environment variable PES_AUTHOR, or default
+    snprintf(commit.author, sizeof(commit.author), "%s", pes_author());
+
+    // Current unix timestamp
+    commit.timestamp = (uint64_t)time(NULL);
+
+    // Commit message
+    snprintf(commit.message, sizeof(commit.message), "%s", message);
+
+    (void)commit_id_out;
+    return -1;  // parent detection and writing not yet done
 }
