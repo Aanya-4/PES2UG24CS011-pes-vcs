@@ -100,8 +100,26 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     else if (type == OBJ_TREE)   type_str = "tree";
     else if (type == OBJ_COMMIT) type_str = "commit";
     else return -1;
-    (void)data; (void)len; (void)id_out;
-    return -1;
+
+    // Step 2: Build header: "<type> <size>\0"
+    // snprintf writes the null terminator, so header_len includes it
+    char header[64];
+    int header_len = snprintf(header, sizeof(header), "%s %zu", type_str, len) + 1;
+
+    // Step 3: Combine header + data into one contiguous buffer
+    size_t total_len = (size_t)header_len + len;
+    uint8_t *full_object = malloc(total_len);
+    if (!full_object) return -1;
+    memcpy(full_object, header, header_len);
+    memcpy(full_object + header_len, data, len);
+
+    // Step 4: Compute SHA-256 hash of the entire object (header + data)
+    ObjectID id;
+    compute_hash(full_object, total_len, &id);
+    if (id_out) *id_out = id;
+
+    free(full_object);
+    return -1;  // disk writing not yet implemented
 }
 // Read an object from the store.
 //
