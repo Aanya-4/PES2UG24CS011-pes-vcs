@@ -187,22 +187,22 @@ static int compare_index_by_path(const void *a, const void *b) {
     return strcmp(((const IndexEntry *)a)->path, ((const IndexEntry *)b)->path);
 }
 int index_save(const Index *index) {
-    // 1. Work on a copy so we don't reorder the caller's in-memory index
-    Index sorted = *index;
-    qsort(sorted.entries, sorted.count, sizeof(IndexEntry), compare_index_by_path);
+    // 1. Sort the entries in the index directly
+    // Since we are sorting the actual index passed in, we cast away const
+    // This is much safer than copying a massive struct to the stack
+    qsort((void*)index->entries, index->count, sizeof(IndexEntry), compare_index_by_path);
 
-    // 2. Write to a temp file first (atomic write pattern)
+    // 2. Write to a temp file first
     char tmp_path[256];
     snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", INDEX_FILE);
     FILE *f = fopen(tmp_path, "w");
     if (!f) return -1;
 
-    for (int i = 0; i < sorted.count; i++) {
-        IndexEntry *e = &sorted.entries[i];
+    for (int i = 0; i < index->count; i++) {
+        const IndexEntry *e = &index->entries[i];
         char hex[HASH_HEX_SIZE + 1];
         hash_to_hex(&e->hash, hex);
 
-        // Format: <mode-octal> <hex-hash> <mtime-sec> <size> <path>
         fprintf(f, "%o %s %llu %u %s\n",
                 e->mode,
                 hex,
@@ -211,12 +211,10 @@ int index_save(const Index *index) {
                 e->path);
     }
 
-    // 3. Flush buffers to the OS, then sync to physical disk
     fflush(f);
     fsync(fileno(f));
     fclose(f);
 
-    // 4. Atomic rename: temp file replaces the real index
     return rename(tmp_path, INDEX_FILE);
 }
 // Stage a file for the next commit.
