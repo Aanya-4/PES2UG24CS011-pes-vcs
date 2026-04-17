@@ -94,7 +94,7 @@ int object_exists(const ObjectID *id) {
 //
 // Returns 0 on success, -1 on error.
 int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out) {
-    // Step 1: Determine the type string for the header
+    // Step 1: Determine type string
     const char *type_str;
     if (type == OBJ_BLOB)        type_str = "blob";
     else if (type == OBJ_TREE)   type_str = "tree";
@@ -102,24 +102,38 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     else return -1;
 
     // Step 2: Build header: "<type> <size>\0"
-    // snprintf writes the null terminator, so header_len includes it
     char header[64];
     int header_len = snprintf(header, sizeof(header), "%s %zu", type_str, len) + 1;
 
-    // Step 3: Combine header + data into one contiguous buffer
+    // Step 3: Combine header + data
     size_t total_len = (size_t)header_len + len;
     uint8_t *full_object = malloc(total_len);
     if (!full_object) return -1;
     memcpy(full_object, header, header_len);
     memcpy(full_object + header_len, data, len);
 
-    // Step 4: Compute SHA-256 hash of the entire object (header + data)
+    // Step 4: Compute SHA-256
     ObjectID id;
     compute_hash(full_object, total_len, &id);
     if (id_out) *id_out = id;
 
+    // Step 5: Deduplication — if object already exists, skip writing
+    if (object_exists(&id)) {
+        free(full_object);
+        return 0;
+    }
+
+    // Step 6: Build shard directory path and create it
+ 
+    char hex[HASH_HEX_SIZE + 1];
+    hash_to_hex(&id, hex);
+
+    char shard_dir[256];
+    snprintf(shard_dir, sizeof(shard_dir), "%s/%.2s", OBJECTS_DIR, hex);
+    mkdir(shard_dir, 0755);  // OK if already exists
+
     free(full_object);
-    return -1;  // disk writing not yet implemented
+    return -1; 
 }
 // Read an object from the store.
 //
