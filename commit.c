@@ -204,19 +204,19 @@ int commit_create(const char *message, ObjectID *commit_id_out) {
     // Step 2: Prepare the Commit struct
     Commit commit;
     memset(&commit, 0, sizeof(commit));
-
-    // Tree hash — the snapshot this commit points to
-    commit.tree = tree_id;
-
-    // Author from environment variable PES_AUTHOR, or default
-    snprintf(commit.author, sizeof(commit.author), "%s", pes_author());
-
-    // Current unix timestamp
+    commit.tree      = tree_id;
+    snprintf(commit.author,  sizeof(commit.author),  "%s", pes_author());
     commit.timestamp = (uint64_t)time(NULL);
-
-    // Commit message
     snprintf(commit.message, sizeof(commit.message), "%s", message);
 
+    // Step 3: Read the current HEAD to get the parent commit.
+    // head_read() returns -1 if there are no commits yet (first commit).
+    if (head_read(&commit.parent) == 0) {
+        commit.has_parent = 1;  // Normal commit: has a parent
+    } else {
+        commit.has_parent = 0;  // Initial commit: no parent
+    }
+
     (void)commit_id_out;
-    return -1;  // parent detection and writing not yet done
+    return -1;  // serialization and writing not yet done
 }
