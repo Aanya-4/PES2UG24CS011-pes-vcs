@@ -23,7 +23,8 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <dirent.h>
-
+int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out);
+uint32_t get_file_mode(const char *path);
 // ─── PROVIDED ────────────────────────────────────────────────────────────────
 
 // Find an index entry by path (linear scan).
@@ -135,10 +136,40 @@ int index_status(const Index *index) {
 //
 // Returns 0 on success, -1 on error.
 int index_load(Index *index) {
-    // TODO: Implement index loading
-    // (See Lab Appendix for logical steps)
-    (void)index;
-    return -1;
+    index->count = 0;
+
+    FILE *f = fopen(INDEX_FILE, "r");
+    if (!f) {
+        // No index file yet = empty index, not an error
+        return 0;
+    }
+
+    // Each line format: <mode-octal> <64-hex-hash> <mtime-sec> <size> <path>
+    // Example: 100644 a1b2c3... 1699900000 42 README.md
+    while (index->count < MAX_INDEX_ENTRIES) {
+        IndexEntry *e = &index->entries[index->count];
+        char hex[HASH_HEX_SIZE + 1];
+        unsigned long long mtime_val;
+        unsigned int size_val;
+
+        int n = fscanf(f, "%o %64s %llu %u %511s\n",
+                       &e->mode,
+                       hex,
+                       &mtime_val,
+                       &size_val,
+                       e->path);
+
+        if (n != 5) break;  // End of file or parse error
+
+        if (hex_to_hash(hex, &e->hash) != 0) break;
+
+        e->mtime_sec = (uint64_t)mtime_val;
+        e->size      = (uint32_t)size_val;
+        index->count++;
+    }
+
+    fclose(f);
+    return 0;
 }
 
 // Save the index to .pes/index atomically.
