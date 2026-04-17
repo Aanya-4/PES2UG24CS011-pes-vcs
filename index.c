@@ -229,26 +229,25 @@ int index_save(const Index *index) {
 //
 // Returns 0 on success, -1 on error.
 int index_add(Index *index, const char *path) {
-    // Step 1: Open and read the file's contents
+    // Step 1: Read the file's contents
     FILE *f = fopen(path, "rb");
     if (!f) {
         fprintf(stderr, "error: cannot open '%s'\n", path);
         return -1;
     }
-
     fseek(f, 0, SEEK_END);
     long file_size = ftell(f);
     fseek(f, 0, SEEK_SET);
     if (file_size < 0) { fclose(f); return -1; }
 
-    void *buf = malloc((size_t)file_size + 1);  // +1 handles empty files safely
+    void *buf = malloc((size_t)file_size + 1);
     if (!buf) { fclose(f); return -1; }
 
     size_t nread = fread(buf, 1, (size_t)file_size, f);
     fclose(f);
     if ((long)nread != file_size) { free(buf); return -1; }
 
-    // Step 2: Write the file content as a blob object
+    // Step 2: Write blob to object store
     ObjectID blob_id;
     if (object_write(OBJ_BLOB, buf, (size_t)file_size, &blob_id) != 0) {
         free(buf);
@@ -256,6 +255,26 @@ int index_add(Index *index, const char *path) {
     }
     free(buf);
 
-    (void)index;
-    return -1;  // index update not yet done
+    // Step 3: Get file metadata (mode, mtime, size)
+    struct stat st;
+    if (lstat(path, &st) != 0) return -1;
+
+    // Step 4: Find existing index entry or create a new one
+    IndexEntry *entry = index_find(index, path);
+    if (!entry) {
+        // New entry — append to the index
+        if (index->count >= MAX_INDEX_ENTRIES) return -1;
+        entry = &index->entries[index->count++];
+    }
+
+    // Step 5: Fill in all fields
+    entry->mode      = get_file_mode(path);
+    entry->hash      = blob_id;
+    entry->mtime_sec = (uint64_t)st.st_mtime;
+    entry->size      = (uint32_t)st.st_size;
+    strncpy(entry->path, path, sizeof(entry->path) - 1);
+    entry->path[sizeof(entry->path) - 1] = '\0';
+
+    // Step 6: Persist the updated index atomically
+    return index_save(index);
 }
