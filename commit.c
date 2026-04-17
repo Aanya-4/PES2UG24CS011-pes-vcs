@@ -209,22 +209,21 @@ int commit_create(const char *message, ObjectID *commit_id_out) {
     commit.timestamp = (uint64_t)time(NULL);
     snprintf(commit.message, sizeof(commit.message), "%s", message);
 
-    // Step 3: Detect parent
+    // Step 3: Detect parent commit
     if (head_read(&commit.parent) == 0) {
         commit.has_parent = 1;
     } else {
         commit.has_parent = 0;
     }
 
-    // Step 4: Serialize the Commit struct to text format
-    // commit_serialize is PROVIDED — it writes the text lines
+    // Step 4: Serialize to text format
     void *commit_data;
     size_t commit_len;
     if (commit_serialize(&commit, &commit_data, &commit_len) != 0) {
         return -1;
     }
 
-    // Step 5: Write the serialized commit to the object store
+    // Step 5: Write commit object
     ObjectID commit_id;
     if (object_write(OBJ_COMMIT, commit_data, commit_len, &commit_id) != 0) {
         free(commit_data);
@@ -232,6 +231,13 @@ int commit_create(const char *message, ObjectID *commit_id_out) {
     }
     free(commit_data);
 
-    (void)commit_id_out;
-    return -1;  // HEAD update not yet done
+    // Step 6: Move the branch pointer (HEAD) to the new commit
+    // head_update is PROVIDED — it writes atomically
+    if (head_update(&commit_id) != 0) {
+        return -1;
+    }
+
+    // Step 7: Return the new commit's ID to the caller
+    if (commit_id_out) *commit_id_out = commit_id;
+    return 0;
 }
